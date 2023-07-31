@@ -1,8 +1,16 @@
 const express = require('express');
 const multer = require('multer');
-const mongoose = require('mongoose');
+const pgp = require('pg-promise')();
 
 const router = express.Router();
+
+const dbConfig = {
+  host: 'localhost',
+  port: 5432,
+  database: 'image_database',
+};
+
+const db = pgp(dbConfig);
 
 // Multer configuration to handle image uploads
 const storage = multer.diskStorage({
@@ -14,31 +22,17 @@ const storage = multer.diskStorage({
   },
 });
 
-mongoose.connect('mongodb://127.0.0.1:27017/image_database', {
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
-});
-
-const imageSchema = new mongoose.Schema({
-  _id: mongoose.Schema.Types.ObjectId,
-  imageName: String,
-  imageUrl: String,
-  annotations: [String],
-});
-
-const Image = mongoose.model('Image', imageSchema);
-
 const upload = multer({ storage: storage });
 
 router.post('/upload', upload.single('image'), async (req, res) => {
   try {
-    const image = new Image({
-      _id: new mongoose.Types.ObjectId(),
-      imageName: req.file.originalname,
-      imageUrl: req.file.path,
-      annotations: [],
-    });
-    await image.save();
+    const imageName = req.file.originalname;
+    const imageUrl = req.file.path;
+
+    const query = `INSERT INTO images (image_name, image_url, annotations) VALUES ($1, $2, $3) RETURNING *`;
+    const values = [imageName, imageUrl, []];
+
+    const image = await db.one(query, values);
     res.status(201).json({ message: 'Image uploaded successfully', image });
   } catch (error) {
     res.status(500).json({ error: 'Failed to upload image' });
@@ -48,24 +42,16 @@ router.post('/upload', upload.single('image'), async (req, res) => {
 router.post('/annotate/:id', async (req, res) => {
   try {
     const imageId = req.params.id;
-    console.log(imageId);
     const annotations = req.body.annotations;
-    console.log(annotations);
 
-    const image = await Image.findById(imageId, function (err, docs) {
-      if (err){
-        console.log(err);
-      }
-      else{
-        console.log("Result : ", docs);
-      }
-    });
+    const query = `UPDATE images SET annotations = $2 WHERE id = $1 RETURNING *`;
+    const values = [imageId, annotations];
+
+    const image = await db.oneOrNone(query, values);
     if (!image) {
       return res.status(404).json({ error: 'Image not found' });
     }
 
-    image.annotations = annotations;
-    await image.save();
     res.json({ message: 'Annotations stored successfully', image });
   } catch (error) {
     res.status(500).json({ error: 'Failed to store annotations' });
@@ -73,20 +59,23 @@ router.post('/annotate/:id', async (req, res) => {
 });
 
 router.get('/generateUniqueId', (req, res) => {
-  const uniqueId = new mongoose.Types.ObjectId();
+  const uniqueId = pgp.as.format('$1^', pgp.utils.uuid());
   res.json({ uniqueId });
 });
 
 router.get('/download/:id', async (req, res) => {
   try {
     const imageId = req.params.id;
-    const image = await Image.findById(imageId);
+
+    const query = `SELECT * FROM images WHERE id = $1`;
+    const image = await db.oneOrNone(query, [imageId]);
+
     if (!image) {
       return res.status(404).json({ error: 'Image not found' });
     }
 
     res.setHeader('Content-Type', 'image/jpeg');
-    fs.createReadStream(image.imageUrl).pipe(res);
+    fs.createReadStream(image.image_url).pipe(res);
   } catch (error) {
     res.status(500).json({ error: 'Failed to download image' });
   }

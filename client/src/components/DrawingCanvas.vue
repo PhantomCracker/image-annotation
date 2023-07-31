@@ -126,7 +126,7 @@ export default {
     stopDrawing() {
       this.isDrawing = false;
     },
-    finishAnnotate() {
+    async finishAnnotate() {
       // Disable drawing functionality permanently
       this.isDrawing = false;
 
@@ -134,6 +134,38 @@ export default {
       this.$refs.canvas.removeEventListener('mousedown', this.startDrawing);
       this.$refs.canvas.removeEventListener('mousemove', this.draw);
       this.$refs.canvas.removeEventListener('mouseup', this.stopDrawing);
+
+      await this.saveImageToDatabase();
+    },
+    async saveImageToDatabase() {
+      try {
+        // Get the canvas element and its context
+        const canvas = this.$refs.canvas;
+        canvas.getContext('2d');
+
+        // Convert the canvas image data to a data URL
+        const imageDataURL = canvas.toDataURL('image/jpeg');
+
+        // Create a new FormData instance to send the image data to the backend
+        const formData = new FormData();
+        formData.append('image', imageDataURL);
+
+        // Send the image data to the backend route for saving
+        const response = await fetch('images/upload', {
+          method: 'POST',
+          body: formData,
+        });
+
+        if (!response.ok) {
+          throw new Error('Failed to save image to database');
+        }
+
+        // Parse the response data (image object) to get the generated ID
+        const data = await response.json();
+        this.generatedId = data.image.id;
+      } catch (error) {
+        console.error('Error saving image to database:', error.message);
+      }
     },
     async generateNewId() {
       const id = uuidv4()
